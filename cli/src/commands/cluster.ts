@@ -212,7 +212,8 @@ async function cmdAdd(argv: string[], deps: ClusterCommandDeps): Promise<number>
   if (!label || !kind || (kind !== "in-cluster" && kind !== "kubeconfig")) {
     deps.print(
       "Usage: cluster add --label <name> --kind <in-cluster|kubeconfig> " +
-        "[--kubeconfig-secret <provider:name>] [--paperclip-public-url <url>] [--image-registry <url>]",
+        "[--kubeconfig-secret <provider:name>] [--paperclip-public-url <url>] [--image-registry <url>] " +
+        "[--cilium] [--storage-class <name>] [--arch <amd64|arm64>] (--arch may repeat)",
     );
     return 2;
   }
@@ -233,17 +234,52 @@ async function cmdAdd(argv: string[], deps: ClusterCommandDeps): Promise<number>
     kubeconfigSecretRef = { provider, name };
   }
 
+  const capabilities = parseCapabilityFlags(flags);
+  if (capabilities === null) {
+    deps.print("Invalid --arch. Allowed values: amd64, arm64.");
+    return 2;
+  }
+  // Defaults match the most common single-arch x86 cluster without Cilium installed.
+  // Operators must pass --cilium for clusters running Cilium so the agent
+  // egress NetworkPolicy + per-tenant CiliumNetworkPolicy actually engage.
+  // `paperclip cluster doctor` reports the detected installation so operators
+  // can verify before adding.
+
   const created = await deps.clusterConnections.create({
     label,
     kind,
     kubeconfigSecretRef,
     paperclipPublicUrl: flags["paperclip-public-url"],
     imageRegistry: flags["image-registry"],
-    capabilities: { cilium: false, storageClass: "standard", architectures: ["amd64"] },
+    capabilities,
     createdBy: process.env.PAPERCLIP_CLI_USER ?? "cli",
   });
   deps.print(`Created cluster connection ${created.id} (${created.label})`);
+  deps.print(
+    `  capabilities: cilium=${capabilities.cilium} storageClass=${capabilities.storageClass} archs=${capabilities.architectures.join(",")}`,
+  );
   return 0;
+}
+
+/**
+ * Build a ClusterCapabilities object from CLI flags. Returns null when --arch
+ * carries an unsupported value.
+ */
+function parseCapabilityFlags(flags: Record<string, string>): ClusterCapabilities | null {
+  const cilium = flags["cilium"] === "true";
+  const storageClass = flags["storage-class"] ?? "standard";
+  const archRaw = flags["arch"];
+  // parseFlags only retains the last value of a repeated flag, so for
+  // multi-arch clusters the operator passes --arch as a comma list.
+  const architectures: ClusterCapabilities["architectures"] =
+    archRaw === undefined
+      ? ["amd64"]
+      : (archRaw.split(",").map((s) => s.trim()).filter(Boolean) as ClusterCapabilities["architectures"]);
+  for (const a of architectures) {
+    if (a !== "amd64" && a !== "arm64") return null;
+  }
+  if (architectures.length === 0) return null;
+  return { cilium, storageClass, architectures };
 }
 
 async function cmdList(_argv: string[], deps: ClusterCommandDeps): Promise<number> {

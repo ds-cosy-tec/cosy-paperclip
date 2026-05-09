@@ -19,7 +19,7 @@ beforeAll(async () => {
     VALUES ('seed-cluster', 'in-cluster', '{"cilium":false,"storageClass":"standard","architectures":["amd64"]}'::jsonb, 'sys')
     RETURNING id
   `);
-  clusterId = (clusterRows.rows?.[0] as { id: string } | undefined)?.id ?? (clusterRows[0] as { id: string }).id;
+  clusterId = (clusterRows[0] as { id: string }).id;
 
   // companies has: id (uuid, defaultRandom), name (text notNull), and everything else defaults.
   const companyRows = await db.execute(sql`
@@ -27,7 +27,7 @@ beforeAll(async () => {
     VALUES ('Acme')
     RETURNING id
   `);
-  companyId = (companyRows.rows?.[0] as { id: string } | undefined)?.id ?? (companyRows[0] as { id: string }).id;
+  companyId = (companyRows[0] as { id: string }).id;
 });
 afterAll(async () => { await dbHandle.cleanup(); });
 

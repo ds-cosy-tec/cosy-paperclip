@@ -23,9 +23,7 @@ beforeAll(async () => {
     VALUES ('seed-cluster', 'in-cluster', '{"cilium":false,"storageClass":"standard","architectures":["amd64"]}'::jsonb, 'sys')
     RETURNING id
   `);
-  clusterId =
-    (clusterRows.rows?.[0] as { id: string } | undefined)?.id ??
-    (clusterRows[0] as { id: string }).id;
+  clusterId = (clusterRows[0] as { id: string }).id;
 
   // Seed a company
   const companyRows = await db.execute(sql`
@@ -33,9 +31,7 @@ beforeAll(async () => {
     VALUES ('Acme')
     RETURNING id
   `);
-  companyId =
-    (companyRows.rows?.[0] as { id: string } | undefined)?.id ??
-    (companyRows[0] as { id: string }).id;
+  companyId = (companyRows[0] as { id: string }).id;
 });
 
 afterAll(async () => {
@@ -74,6 +70,38 @@ describe("clusterNamespaceBindingsService", () => {
     expect(found?.namespaceName).toBe("paperclip-acme-v2");
   });
 
+  it("record() handles concurrent first-write without violating the unique constraint", async () => {
+    // Seed an isolated company so this test does not interact with the rows
+    // written by the earlier suite cases.
+    const conRows = await db.execute(sql`
+      INSERT INTO companies (name, issue_prefix)
+      VALUES ('Gamma Corp', 'GAM')
+      RETURNING id
+    `);
+    const conCompanyId = (conRows[0] as { id: string }).id;
+
+    const svc = clusterNamespaceBindingsService(db);
+    const N = 8;
+    // The pre-fix select-then-insert shape lost this race: two callers would
+    // both observe no row and one would hit the unique constraint as an
+    // unhandled error. With ON CONFLICT the upsert is unconditionally atomic.
+    await Promise.all(
+      Array.from({ length: N }, (_, i) =>
+        svc.record({
+          clusterConnectionId: clusterId,
+          companyId: conCompanyId,
+          namespaceName: `paperclip-gamma-${i}`,
+        }),
+      ),
+    );
+
+    const found = await svc.getByClusterAndCompany(clusterId, conCompanyId);
+    expect(found).not.toBeNull();
+    // The winning name is whichever upsert committed last; we only need to
+    // assert that exactly one row exists and no exceptions were thrown.
+    expect(found?.namespaceName).toMatch(/^paperclip-gamma-\d$/);
+  });
+
   it("record() preserves other rows when called for a different company", async () => {
     const svc = clusterNamespaceBindingsService(db);
 
@@ -83,9 +111,7 @@ describe("clusterNamespaceBindingsService", () => {
       VALUES ('Beta Corp', 'BET')
       RETURNING id
     `);
-    const otherCompanyId =
-      (otherRows.rows?.[0] as { id: string } | undefined)?.id ??
-      (otherRows[0] as { id: string }).id;
+    const otherCompanyId = (otherRows[0] as { id: string }).id;
 
     await svc.record({
       clusterConnectionId: clusterId,

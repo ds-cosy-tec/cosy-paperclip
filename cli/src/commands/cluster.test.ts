@@ -104,6 +104,59 @@ describe("cluster commands", () => {
     expect(code).not.toBe(0);
   });
 
+  it("add: passes --cilium / --storage-class / --arch through to capabilities", async () => {
+    const m = mocks();
+    const cmd = createClusterCommand(m);
+    const code = await cmd.run([
+      "add",
+      "--label", "prod-eks",
+      "--kind", "kubeconfig",
+      "--kubeconfig-secret", "aws_secrets:prod",
+      "--cilium",
+      "--storage-class", "gp3",
+      "--arch", "amd64,arm64",
+    ]);
+    expect(code).toBe(0);
+    const arg = (m.clusterConnections.create as any).mock.calls[0][0];
+    expect(arg.capabilities).toEqual({
+      cilium: true,
+      storageClass: "gp3",
+      architectures: ["amd64", "arm64"],
+    });
+  });
+
+  it("add: defaults capabilities to single-arch x86 without Cilium when no flags are passed", async () => {
+    const m = mocks();
+    const cmd = createClusterCommand(m);
+    const code = await cmd.run([
+      "add",
+      "--label", "kind",
+      "--kind", "kubeconfig",
+      "--kubeconfig-secret", "local_encrypted:my-cfg",
+    ]);
+    expect(code).toBe(0);
+    const arg = (m.clusterConnections.create as any).mock.calls[0][0];
+    expect(arg.capabilities).toEqual({
+      cilium: false,
+      storageClass: "standard",
+      architectures: ["amd64"],
+    });
+  });
+
+  it("add: rejects --arch with an unsupported value", async () => {
+    const m = mocks();
+    const cmd = createClusterCommand(m);
+    const code = await cmd.run([
+      "add",
+      "--label", "x",
+      "--kind", "kubeconfig",
+      "--kubeconfig-secret", "local_encrypted:y",
+      "--arch", "ppc64le",
+    ]);
+    expect(code).not.toBe(0);
+    expect(m.clusterConnections.create).not.toHaveBeenCalled();
+  });
+
   it("list: prints connections with capabilities", async () => {
     const m = mocks();
     const cmd = createClusterCommand(m);

@@ -55,8 +55,13 @@ jobs:
           kind --version
 
       - name: Install kubectl
+        # Pinned to match the kind v0.24.0 default node image (Kubernetes
+        # v1.31.x). Bump deliberately when updating kind so the client/server
+        # skew stays within the supported one-minor-version window.
+        env:
+          KUBECTL_VERSION: v1.31.0
         run: |
-          curl -sLo /tmp/kubectl "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          curl -sLo /tmp/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
           chmod +x /tmp/kubectl
           sudo mv /tmp/kubectl /usr/local/bin/kubectl
           kubectl version --client

@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import { clusterNamespaceBindings } from "@paperclipai/db";
 
@@ -19,29 +19,25 @@ export interface ClusterNamespaceBindingsService {
 export function clusterNamespaceBindingsService(db: Db): ClusterNamespaceBindingsService {
   return {
     async record(input) {
-      const [existing] = await db
-        .select()
-        .from(clusterNamespaceBindings)
-        .where(
-          and(
-            eq(clusterNamespaceBindings.clusterConnectionId, input.clusterConnectionId),
-            eq(clusterNamespaceBindings.companyId, input.companyId),
-          ),
-        );
-
-      if (existing) {
-        await db
-          .update(clusterNamespaceBindings)
-          .set({ namespaceName: input.namespaceName, updatedAt: new Date() })
-          .where(eq(clusterNamespaceBindings.id, existing.id));
-        return;
-      }
-
-      await db.insert(clusterNamespaceBindings).values({
-        clusterConnectionId: input.clusterConnectionId,
-        companyId: input.companyId,
-        namespaceName: input.namespaceName,
-      });
+      // Atomic upsert keyed on the (cluster_connection_id, company_id) unique
+      // index. The previous select-then-insert had a TOCTOU race under
+      // concurrent provisioning: two callers could both observe no existing
+      // binding, both INSERT, and one would hit the unique constraint as an
+      // unhandled error.
+      await db
+        .insert(clusterNamespaceBindings)
+        .values({
+          clusterConnectionId: input.clusterConnectionId,
+          companyId: input.companyId,
+          namespaceName: input.namespaceName,
+        })
+        .onConflictDoUpdate({
+          target: [clusterNamespaceBindings.clusterConnectionId, clusterNamespaceBindings.companyId],
+          set: {
+            namespaceName: input.namespaceName,
+            updatedAt: sql`now()`,
+          },
+        });
     },
 
     async getByClusterAndCompany(clusterConnectionId, companyId) {

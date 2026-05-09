@@ -123,18 +123,28 @@ export function createKubernetesApiClient(connection: ResolvedClusterConnection)
       }
 
       const agent = getHttpsAgent();
+      // 30s socket timeout. Without this the request could hang for tens of
+      // minutes if the API server stops responding mid-handshake (Node's
+      // default keep-alive socket has no upper bound). 30s is well above
+      // realistic API server tail latency but short enough that ensureTenant
+      // surfaces an actionable error rather than appearing to stall.
+      const REQUEST_TIMEOUT_MS = 30_000;
       const options: HttpsRequestOptions = {
         method,
         hostname: url.hostname,
         port: url.port || (url.protocol === "https:" ? 443 : 80),
         path: `${url.pathname}${url.search}`,
         headers,
+        timeout: REQUEST_TIMEOUT_MS,
       };
       if (agent) options.agent = agent;
 
       const incoming = await new Promise<import("node:http").IncomingMessage>((resolve, reject) => {
         const req = httpsRequest(options, (res) => resolve(res));
         req.once("error", reject);
+        req.once("timeout", () => {
+          req.destroy(new Error(`k8s API ${method} ${path} timed out after ${REQUEST_TIMEOUT_MS}ms`));
+        });
         if (payload !== undefined) req.write(payload);
         req.end();
       });
