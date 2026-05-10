@@ -1,5 +1,5 @@
 import { Router, type RequestHandler } from "express";
-import { and, eq } from "drizzle-orm";
+import { and, eq, gt, isNull } from "drizzle-orm";
 import {
   oauthAuthorizationStates,
   oauthConnections,
@@ -58,31 +58,58 @@ export function oauthCallbackRoute(deps: OAuthCallbackDeps): RequestHandler {
     const providerError =
       typeof req.query.error === "string" ? req.query.error : "";
 
-    const stateRow = await deps.db.query.oauthAuthorizationStates.findFirst({
-      where: eq(oauthAuthorizationStates.id, stateId),
-    });
-    if (!stateRow) {
+    // Atomic state claim: mark consumed_at in a single UPDATE that requires
+    // consumed_at IS NULL and expires_at > now(). Closes the TOCTOU window
+    // between SELECT-time expiry/consumed checks and the eventual UPDATE that
+    // would otherwise let two concurrent callbacks both pass the checks and
+    // both attempt token exchange. RETURNING gives us the row contents we
+    // need without a second SELECT on the happy path.
+    const claimNow = new Date();
+    const claimResult: Array<typeof oauthAuthorizationStates.$inferSelect> =
+      await deps.db
+        .update(oauthAuthorizationStates)
+        .set({ consumedAt: claimNow })
+        .where(
+          and(
+            eq(oauthAuthorizationStates.id, stateId),
+            isNull(oauthAuthorizationStates.consumedAt),
+            gt(oauthAuthorizationStates.expiresAt, claimNow),
+          ),
+        )
+        .returning();
+
+    if (claimResult.length === 0) {
+      // Lost the race, already consumed, expired, or missing. SELECT to
+      // disambiguate so we can return the right user-facing error code.
+      const probe = await deps.db.query.oauthAuthorizationStates.findFirst({
+        where: eq(oauthAuthorizationStates.id, stateId),
+      });
+      if (!probe) {
+        return res.redirect(
+          302,
+          back(deps, null, { oauth_error: "invalid_state" }),
+        );
+      }
+      if (probe.consumedAt) {
+        return res.redirect(
+          302,
+          back(deps, probe.returnUrl, { oauth_error: "replay" }),
+        );
+      }
+      // Row exists, not consumed, but failed the expires_at predicate.
       return res.redirect(
         302,
-        back(deps, null, { oauth_error: "invalid_state" }),
+        back(deps, probe.returnUrl, { oauth_error: "invalid_state" }),
       );
     }
-    if (stateRow.consumedAt) {
-      return res.redirect(
-        302,
-        back(deps, stateRow.returnUrl, { oauth_error: "replay" }),
-      );
-    }
-    if (
-      stateRow.expiresAt instanceof Date
-        ? stateRow.expiresAt.getTime() < Date.now()
-        : new Date(stateRow.expiresAt).getTime() < Date.now()
-    ) {
-      return res.redirect(
-        302,
-        back(deps, stateRow.returnUrl, { oauth_error: "invalid_state" }),
-      );
-    }
+
+    const stateRow = claimResult[0];
+
+    // Provider-mismatch check happens after the claim: a callback that
+    // arrives at a different provider's URL has already used the state in an
+    // unauthorized way, so consuming it here is the right outcome — the
+    // legitimate provider's callback would just hit "replay" and the user
+    // would restart the flow.
     if (stateRow.providerId !== providerId) {
       return res.redirect(
         302,
@@ -91,10 +118,6 @@ export function oauthCallbackRoute(deps: OAuthCallbackDeps): RequestHandler {
     }
 
     if (providerError === "access_denied") {
-      await deps.db
-        .update(oauthAuthorizationStates)
-        .set({ consumedAt: new Date() })
-        .where(eq(oauthAuthorizationStates.id, stateRow.id));
       return res.redirect(
         302,
         back(deps, stateRow.returnUrl, { oauth_error: "user_cancelled" }),
@@ -275,17 +298,11 @@ export function oauthCallbackRoute(deps: OAuthCallbackDeps): RequestHandler {
             lastRefreshedAt: new Date(),
           });
         }
-        await tx
-          .update(oauthAuthorizationStates)
-          .set({ consumedAt: new Date() })
-          .where(eq(oauthAuthorizationStates.id, stateRow.id));
+        // State row was already atomically consumed at the top of this
+        // handler, so there is no separate UPDATE to consume it here.
       });
     } catch (err) {
       if ((err as Error).message === "ACCOUNT_MISMATCH") {
-        await deps.db
-          .update(oauthAuthorizationStates)
-          .set({ consumedAt: new Date() })
-          .where(eq(oauthAuthorizationStates.id, stateRow.id));
         // Roll back the secret writes that landed before mismatch was
         // detected. `remove` is idempotent and best-effort — swallow
         // failures so a secrets cleanup hiccup doesn't override the

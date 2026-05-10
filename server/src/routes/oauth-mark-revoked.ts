@@ -1,5 +1,5 @@
 import { Router, type RequestHandler } from "express";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { oauthConnections } from "@paperclipai/db/schema/oauth";
 
 export interface MarkRevokedDeps {
@@ -11,12 +11,13 @@ export interface MarkRevokedDeps {
 interface RunJwtClaim {
   connectionIds?: unknown;
   runId?: unknown;
+  companyId?: unknown;
 }
 
-// The run-JWT middleware (M2 in the plan) attaches `req.runJwt` with the OAuth
-// connection IDs scoped to this run. Until that middleware lands the field is
-// not on Express.Request globally — we read it via a local cast and tests
-// inject it directly. No global type augmentation here on purpose.
+// The run-JWT middleware attaches `req.runJwt` with the OAuth connection IDs
+// scoped to this run plus the issuing company. The field is not on
+// Express.Request in this module's TS view — we read it via a local cast and
+// tests inject it directly.
 export function oauthMarkRevokedRoute(deps: MarkRevokedDeps): RequestHandler {
   const r = Router({ mergeParams: true });
   r.post("/", async (req, res) => {
@@ -33,6 +34,15 @@ export function oauthMarkRevokedRoute(deps: MarkRevokedDeps): RequestHandler {
       res.status(403).json({ errorCode: "forbidden" });
       return;
     }
+    const companyId = typeof claim.companyId === "string" ? claim.companyId : "";
+    if (!companyId) {
+      res.status(401).json({ errorCode: "unauthenticated" });
+      return;
+    }
+    // Defense-in-depth: scope the UPDATE to the JWT's company too. The
+    // connectionIds list is the primary boundary, but pinning company_id
+    // prevents a stale or crafted JWT containing a connection ID from
+    // another tenant from silently mutating a cross-tenant row.
     await deps.db
       .update(oauthConnections)
       .set({
@@ -41,7 +51,12 @@ export function oauthMarkRevokedRoute(deps: MarkRevokedDeps): RequestHandler {
         lastErrorAt: new Date(),
         updatedAt: new Date(),
       })
-      .where(eq(oauthConnections.id, id));
+      .where(
+        and(
+          eq(oauthConnections.id, id),
+          eq(oauthConnections.companyId, companyId),
+        ),
+      );
     res.status(204).end();
   });
   return r;
