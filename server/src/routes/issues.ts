@@ -422,11 +422,11 @@ type RecoveryActionsLister = {
   ) => Promise<Map<string, NonNullable<IssueRelationIssueSummary["activeRecoveryAction"]>>>;
 };
 
-async function annotateRelationSummariesWithRecoveryActions(
+async function relationRecoveryActionMap(
   recoveryActionsSvc: RecoveryActionsLister,
   companyId: string,
   relations: { blockedBy: IssueRelationIssueSummary[]; blocks: IssueRelationIssueSummary[] },
-) {
+): Promise<Map<string, NonNullable<IssueRelationIssueSummary["activeRecoveryAction"]>>> {
   const candidates: IssueRelationIssueSummary[] = [];
   const visit = (summary: IssueRelationIssueSummary) => {
     candidates.push(summary);
@@ -436,13 +436,24 @@ async function annotateRelationSummariesWithRecoveryActions(
   };
   for (const blocker of relations.blockedBy) visit(blocker);
   for (const blocking of relations.blocks) visit(blocking);
-  if (candidates.length === 0) return;
+  if (candidates.length === 0) return new Map();
   const ids = [...new Set(candidates.map((summary) => summary.id))];
-  const map = await recoveryActionsSvc.listActiveForIssues(companyId, ids);
-  for (const summary of candidates) {
-    const action = map.get(summary.id) ?? null;
-    if (action) summary.activeRecoveryAction = action;
-  }
+  return recoveryActionsSvc.listActiveForIssues(companyId, ids);
+}
+
+function withRecoveryActionsOnRelationSummaries(
+  relations: { blockedBy: IssueRelationIssueSummary[]; blocks: IssueRelationIssueSummary[] },
+  recoveryActionByIssueId: Map<string, NonNullable<IssueRelationIssueSummary["activeRecoveryAction"]>>,
+) {
+  const augment = (summary: IssueRelationIssueSummary): IssueRelationIssueSummary => ({
+    ...summary,
+    activeRecoveryAction: recoveryActionByIssueId.get(summary.id) ?? summary.activeRecoveryAction ?? null,
+    terminalBlockers: summary.terminalBlockers?.map(augment),
+  });
+  return {
+    blockedBy: relations.blockedBy.map(augment),
+    blocks: relations.blocks.map(augment),
+  };
 }
 
 const ACTIVE_REVIEW_APPROVAL_STATUSES = new Set(["pending", "revision_requested"]);
@@ -1599,10 +1610,14 @@ export function issueRoutes(
         currentExecutionWorkspacePromise,
         recoveryActionsSvc.getActiveForIssue(issue.companyId, issue.id),
       ]);
-    await annotateRelationSummariesWithRecoveryActions(
+    const recoveryActionsByRelationIssue = await relationRecoveryActionMap(
       recoveryActionsSvc,
       issue.companyId,
       relations,
+    );
+    const relationsWithRecoveryActions = withRecoveryActionsOnRelationSummaries(
+      relations,
+      recoveryActionsByRelationIssue,
     );
 
     res.json({
@@ -1621,8 +1636,8 @@ export function issueRoutes(
         projectId: issue.projectId,
         goalId: goal?.id ?? issue.goalId,
         parentId: issue.parentId,
-        blockedBy: relations.blockedBy,
-        blocks: relations.blocks,
+        blockedBy: relationsWithRecoveryActions.blockedBy,
+        blocks: relationsWithRecoveryActions.blocks,
         assigneeAgentId: issue.assigneeAgentId,
         assigneeUserId: issue.assigneeUserId,
         originKind: issue.originKind,
@@ -1713,10 +1728,14 @@ export function issueRoutes(
       svc.getCurrentScheduledRetry(issue.id),
       recoveryActionsSvc.getActiveForIssue(issue.companyId, issue.id),
     ]);
-    await annotateRelationSummariesWithRecoveryActions(
+    const recoveryActionsByRelationIssue = await relationRecoveryActionMap(
       recoveryActionsSvc,
       issue.companyId,
       relations,
+    );
+    const relationsWithRecoveryActions = withRecoveryActionsOnRelationSummaries(
+      relations,
+      recoveryActionsByRelationIssue,
     );
     const mentionedProjects = mentionedProjectIds.length > 0
       ? await projectsSvc.listByIds(issue.companyId, mentionedProjectIds)
@@ -1734,8 +1753,8 @@ export function issueRoutes(
       successfulRunHandoff: successfulRunHandoffStates.get(issue.id) ?? null,
       scheduledRetry,
       activeRecoveryAction,
-      blockedBy: relations.blockedBy,
-      blocks: relations.blocks,
+      blockedBy: relationsWithRecoveryActions.blockedBy,
+      blocks: relationsWithRecoveryActions.blocks,
       relatedWork: referenceSummary,
       referencedIssueIdentifiers: referenceSummary.outbound.map((item) => item.issue.identifier ?? item.issue.id),
       ...documentPayload,

@@ -2193,7 +2193,7 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
   }
 
   async function collectIssueGraphLivenessFindings() {
-    const issueRows = await db
+    const issueRowsPromise = Promise.resolve(db
       .select({
         id: issues.id,
         companyId: issues.companyId,
@@ -2218,10 +2218,10 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
           isNull(issues.hiddenAt),
           notInArray(issues.originKind, [RECOVERY_ORIGIN_KINDS.issueGraphLivenessEscalation]),
         ),
-      );
-    const issueIdsUnderAnalysis = issueRows.map((row) => row.id);
+      ));
 
     const [
+      issueRows,
       relationRows,
       agentRows,
       activeRunRows,
@@ -2232,6 +2232,7 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
       recoveryIssueRows,
       recoveryActionRows,
     ] = await Promise.all([
+      issueRowsPromise,
       db
         .select({
           companyId: issueRelations.companyId,
@@ -2321,21 +2322,24 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
             notInArray(issues.status, ["done", "cancelled"]),
           ),
         ),
-      issueIdsUnderAnalysis.length === 0
-        ? Promise.resolve([])
-        : db
-          .select({
-            companyId: issueRecoveryActions.companyId,
-            issueId: issueRecoveryActions.sourceIssueId,
-            status: issueRecoveryActions.status,
-          })
-          .from(issueRecoveryActions)
-          .where(
-            and(
-              inArray(issueRecoveryActions.status, ["active", "escalated"]),
-              inArray(issueRecoveryActions.sourceIssueId, issueIdsUnderAnalysis),
-            ),
-          ),
+      issueRowsPromise.then((rows) => {
+        const issueIdsUnderAnalysis = rows.map((row) => row.id);
+        return issueIdsUnderAnalysis.length === 0
+          ? []
+          : db
+            .select({
+              companyId: issueRecoveryActions.companyId,
+              issueId: issueRecoveryActions.sourceIssueId,
+              status: issueRecoveryActions.status,
+            })
+            .from(issueRecoveryActions)
+            .where(
+              and(
+                inArray(issueRecoveryActions.status, ["active", "escalated"]),
+                inArray(issueRecoveryActions.sourceIssueId, issueIdsUnderAnalysis),
+              ),
+            );
+      }),
     ]);
 
     const openRecoveryIssues = recoveryIssueRows.flatMap((row) => {
