@@ -5,20 +5,9 @@ import {
   executeWorkspaceStrategy,
   realGitRunner,
 } from "@paperclipai/workspace-strategy";
+import { exchangeBootstrapToken } from "./bootstrap-token.js";
 import { createGitCredentialsClient } from "./git-credentials.js";
 import { parseRequest } from "./parse-request.js";
-
-async function exchangeBootstrapToken(input: { paperclipPublicUrl: string; bootstrapToken: string }): Promise<string> {
-  const res = await fetch(`${input.paperclipPublicUrl}/api/agent-auth/exchange`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ bootstrapToken: input.bootstrapToken }),
-  });
-  if (!res.ok) throw new Error(`bootstrap exchange failed (${res.status}): ${await res.text()}`);
-  const body = (await res.json()) as { runJwt?: string };
-  if (!body.runJwt) throw new Error("exchange response missing runJwt");
-  return body.runJwt;
-}
 
 async function main() {
   const root = process.env.PAPERCLIP_WORKSPACE_ROOT ?? "/workspace";

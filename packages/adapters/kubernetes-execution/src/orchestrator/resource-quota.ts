@@ -1,4 +1,4 @@
-import type { V1ResourceQuota, V1LimitRange } from "@kubernetes/client-node";
+import { ObjectSerializer, type V1ResourceQuota, type V1LimitRange } from "@kubernetes/client-node";
 import type { KubernetesApiClient } from "../types.js";
 import { tenantBaseLabels } from "./labels.js";
 
@@ -119,6 +119,10 @@ export function buildLimitRange(input: BuildLimitRangeInput): V1LimitRange {
   };
 }
 
+function toLimitRangeWireBody(lr: V1LimitRange): V1LimitRange {
+  return ObjectSerializer.serialize(lr, "V1LimitRange") as V1LimitRange;
+}
+
 async function upsertNamespaced<
   T extends { metadata?: { name?: string; namespace?: string } }
 >(
@@ -179,7 +183,7 @@ export async function applyLimitRange(
       client.core.patchNamespacedLimitRange(
         name,
         ns,
-        body,
+        toLimitRangeWireBody(body),
         undefined,
         undefined,
         undefined,

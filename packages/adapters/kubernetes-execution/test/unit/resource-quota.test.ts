@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
+  applyLimitRange,
   buildResourceQuota,
   buildLimitRange,
   defaultTenantQuota,
@@ -61,5 +62,28 @@ describe("buildLimitRange", () => {
     const container = lr.spec?.limits?.find((l) => l.type === "Container");
     expect(container?._default?.cpu).toBe("2");
     expect(container?._default?.memory).toBe(defaultTenantLimits.default.memory);
+  });
+
+  it("patches the Kubernetes wire field name for container defaults", async () => {
+    const patchNamespacedLimitRange = vi.fn(async () => ({}));
+    const client = {
+      core: {
+        readNamespacedLimitRange: vi.fn(async () => ({})),
+        patchNamespacedLimitRange,
+      },
+    };
+    const lr = buildLimitRange({
+      namespace: "paperclip-acme",
+      companyId: "c-1",
+      companySlug: "acme",
+      override: null,
+    });
+
+    await applyLimitRange(client as never, lr);
+
+    const patchBody = patchNamespacedLimitRange.mock.calls[0]?.[2];
+    const container = patchBody?.spec?.limits?.find((l: { type?: string }) => l.type === "Container");
+    expect(container?.default?.cpu).toBe(defaultTenantLimits.default.cpu);
+    expect(container?._default).toBeUndefined();
   });
 });
