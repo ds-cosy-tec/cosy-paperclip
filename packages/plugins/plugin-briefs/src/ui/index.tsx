@@ -1,1 +1,1 @@
-export { SidebarLink, BriefingPage } from "./app.js";
+export { SidebarLink, BriefingPage, SettingsPage } from "./app.js";

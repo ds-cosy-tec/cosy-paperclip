@@ -35,6 +35,13 @@ const PROMPT_INJECTION_PATTERNS = [
   /\breveal (the )?(secret|token|credential|api key|password)\b/i,
 ];
 
+const ISSUE_IDENTIFIER_PATTERN = /\b[A-Z][A-Z0-9]+-\d+\b/;
+const LOW_LEVEL_STATUS_LABEL_PATTERNS = [
+  /\b(is|are|was|were|remains?|still)\s+(todo|done|stale|blocked|in[- ]review|in[- ]progress)\b/i,
+  /\b(todo|done|stale|blocked|in[- ]review|in[- ]progress)\s+(issue|row|card|state|status)\b/i,
+  /\bwaiting[- ]user|waiting[- ]reviewer\b/i,
+];
+
 type SummaryFacts = {
   hasBlocked: boolean;
   hasWaitingUser: boolean;
@@ -134,12 +141,24 @@ function unsupportedOwnerClaim(summary: string): boolean {
   return /\b(owner|owned by|assignee|assigned to|responsible agent|responsible user)\b/i.test(summary);
 }
 
+function usesLowLevelIssueLabels(summary: string): boolean {
+  return ISSUE_IDENTIFIER_PATTERN.test(summary)
+    || LOW_LEVEL_STATUS_LABEL_PATTERNS.some((pattern) => pattern.test(summary));
+}
+
 function fallbackOptions(reason: BriefSummaryFailureReason, generated: Pick<DeterministicBriefOptions, "generatedByAgentId" | "generatedByRunId">): DeterministicBriefOptions {
   return {
     summaryStatus: "fallback",
     summaryFailureReason: reason,
     generatedByAgentId: generated.generatedByAgentId ?? null,
     generatedByRunId: generated.generatedByRunId ?? null,
+  };
+}
+
+function withoutGeneratedTitle(options: DeterministicBriefOptions): DeterministicBriefOptions {
+  return {
+    ...options,
+    title: null,
   };
 }
 
@@ -170,23 +189,28 @@ export function hardenGeneratedSummaryOptions(
   bundle: BriefsSourceBundle,
   options: DeterministicBriefOptions & { allowGeneratedSummary?: boolean },
 ): DeterministicBriefOptions {
-  if (options.summaryStatus !== "ok" || !options.summaryParagraph) {
-    return options;
+  let nextOptions: DeterministicBriefOptions & { allowGeneratedSummary?: boolean } = options;
+  const generatedTitle = options.title?.trim();
+  if (generatedTitle && (!options.allowGeneratedSummary || hasSecretLikeValue(generatedTitle) || hasPromptInjection(generatedTitle))) {
+    nextOptions = withoutGeneratedTitle(options);
+  }
+  if (nextOptions.summaryStatus !== "ok" || !nextOptions.summaryParagraph) {
+    return nextOptions;
   }
   const generated = {
-    generatedByAgentId: options.generatedByAgentId ?? null,
-    generatedByRunId: options.generatedByRunId ?? null,
+    generatedByAgentId: nextOptions.generatedByAgentId ?? null,
+    generatedByRunId: nextOptions.generatedByRunId ?? null,
   };
-  if (!options.allowGeneratedSummary) {
+  if (!nextOptions.allowGeneratedSummary) {
     return fallbackOptions("safety_block", generated);
   }
-  const summary = options.summaryParagraph;
+  const summary = nextOptions.summaryParagraph;
   if (hasSecretLikeValue(summary) || hasPromptInjection(summary)) {
     return fallbackOptions("safety_block", generated);
   }
   const facts = sourceFacts(bundle);
-  if (unsupportedOwnerClaim(summary) || unsupportedStatusClaim(summary, facts)) {
+  if (usesLowLevelIssueLabels(summary) || unsupportedOwnerClaim(summary) || unsupportedStatusClaim(summary, facts)) {
     return fallbackOptions("safety_block", generated);
   }
-  return options;
+  return nextOptions;
 }

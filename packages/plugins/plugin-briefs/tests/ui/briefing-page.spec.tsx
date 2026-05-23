@@ -1,43 +1,27 @@
-/**
- * Regression tests for the Briefing page chrome — the parts the screenshot
- * fixture used to skip (MobileTabs, Legend, responsive CSS injection).
- *
- * These tests served as the verification path for the UX review on PAP-9963:
- * before the fix, the screenshot fixture hand-wrote the page shell and never
- * exercised these components, which masked a CSS-specificity bug that broke
- * the mobile section filter. Asserting on the real `<BriefingPage>` output
- * keeps that gap closed.
- */
+import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { BriefCard, BriefPreferences } from "../../src/contracts.js";
+import type { BriefCard } from "../../src/contracts.js";
 import { gallery } from "./fixtures.js";
 
 type PageData = {
   cards: BriefCard[];
-  preferences: BriefPreferences;
   fetchedAt: string;
-};
-
-const defaultPreferences: BriefPreferences = {
-  companyId: "company-1",
-  userId: "user-1",
-  cadence: "daily",
-  retentionDays: 14,
-  doneRetentionHours: 48,
-  staleAfterDays: 7,
-  maxUnpinnedCards: 24,
-  scope: "user",
 };
 
 let mockPageData: PageData = {
   cards: [],
-  preferences: defaultPreferences,
   fetchedAt: "2026-05-22T10:00:00.000Z",
 };
 
 vi.mock("@paperclipai/plugin-sdk/ui", () => {
   return {
+    ManagedRoutinesList: ({ routines }: { routines: Array<{ title: string }> }) => (
+      <div data-managed-routines-list>{routines.map((routine) => routine.title).join("|")}</div>
+    ),
+    IssueRow: ({ issue, trailingMeta }: { issue: { identifier?: string | null; title: string }; trailingMeta?: ReactNode }) => (
+      <a data-plugin-issue-row={issue.identifier ?? ""} href={`/issues/${issue.identifier ?? ""}`}>{issue.identifier} {issue.title} {trailingMeta}</a>
+    ),
     useHostNavigation: () => ({
       resolveHref: (to: string) => to,
       navigate: () => {},
@@ -48,6 +32,45 @@ vi.mock("@paperclipai/plugin-sdk/ui", () => {
       if (key === "page") {
         return { data: mockPageData, loading: false, error: null, refresh: () => {} };
       }
+      if (key === "settings") {
+        return {
+          data: {
+            managedAgent: {
+              status: "resolved",
+              agentId: "agent-1",
+              agent: { id: "agent-1", name: "Briefing Analyst", status: "paused", adapterType: "codex_local", icon: "newspaper" },
+            },
+            managedProject: {
+              status: "resolved",
+              projectId: "project-1",
+              project: { id: "project-1", name: "Briefs", status: "in_progress", color: "#0f766e" },
+            },
+            managedSkills: [
+              { status: "resolved", skillId: "skill-1", resourceKey: "briefs-discover-cards", skill: { id: "skill-1", name: "Briefs Discover Cards" } },
+              { status: "resolved", skillId: "skill-2", resourceKey: "briefs-update-cards", skill: { id: "skill-2", name: "Briefs Update Cards" } },
+            ],
+            managedRoutines: [
+              {
+                status: "resolved",
+                routineId: "routine-1",
+                resourceKey: "briefs-discover-cards",
+                routine: { id: "routine-1", title: "Discover Briefing cards for {{userId}}", status: "paused", projectId: "project-1", assigneeAgentId: "agent-1" },
+              },
+              {
+                status: "resolved",
+                routineId: "routine-2",
+                resourceKey: "briefs-update-cards",
+                routine: { id: "routine-2", title: "Update Briefing cards for {{userId}}", status: "paused", projectId: "project-1", assigneeAgentId: "agent-1" },
+              },
+            ],
+            agentOptions: [{ id: "agent-1", name: "Briefing Analyst", icon: "newspaper" }],
+            projectOptions: [{ id: "project-1", name: "Briefs", color: "#0f766e" }],
+          },
+          loading: false,
+          error: null,
+          refresh: () => {},
+        };
+      }
       return { data: null, loading: false, error: null, refresh: () => {} };
     },
     usePluginToast: () => vi.fn(),
@@ -57,7 +80,7 @@ vi.mock("@paperclipai/plugin-sdk/ui", () => {
 });
 
 import { renderToStaticMarkup } from "react-dom/server";
-import { BriefingPage } from "../../src/ui/app.js";
+import { BriefingPage, SettingsPage, SidebarLink } from "../../src/ui/app.js";
 
 const hostContext = {
   companyId: "company-1",
@@ -69,48 +92,79 @@ const hostContext = {
 } as const;
 
 function renderPage(cards: BriefCard[]): string {
-  mockPageData = { cards, preferences: defaultPreferences, fetchedAt: "2026-05-22T10:00:00.000Z" };
+  mockPageData = { cards, fetchedAt: "2026-05-22T10:00:00.000Z" };
   return renderToStaticMarkup(<BriefingPage context={hostContext as never} />);
 }
 
 describe("BriefingPage", () => {
-  it("renders the MobileTabs sticky bar so it appears in screenshots", () => {
+  it("renders a single sorted briefing list instead of section tabs", () => {
     const html = renderPage(gallery());
-    expect(html).toContain("data-briefs-mobile-tabs");
-    expect(html).toMatch(/aria-label="Briefing sections"/);
-    // All four tabs must be present: All / Needs you / Live / Done.
-    expect(html).toContain(">All<");
-    expect(html).toContain(">Needs you<");
-    expect(html).toContain(">Live<");
-    expect(html).toContain(">Done<");
-  });
 
-  it("renders the Legend below the section grid", () => {
-    const html = renderPage(gallery());
-    expect(html).toContain("data-briefs-legend");
-  });
-
-  it("marks non-active sections with data-mobile-hidden so the CSS filter has a target", () => {
-    const html = renderPage(gallery());
-    // The default mobile tab is "attention", so every other section must be
-    // tagged hidden. Without the CSS `!important` fix, this attribute existed
-    // but did nothing — the test still guards the data contract.
-    expect(html).toContain('data-briefs-section="live"');
-    expect(html).toContain('data-briefs-section="settled"');
-    expect(html).toMatch(/data-briefs-section="live"[^>]*data-mobile-hidden="true"/);
-    expect(html).toMatch(/data-briefs-section="settled"[^>]*data-mobile-hidden="true"/);
-  });
-
-  it("tags the page header meta block so mobile reflow CSS can reorder it", () => {
-    const html = renderPage(gallery());
-    expect(html).toContain("data-briefs-page-header");
-    expect(html).toContain("data-briefs-page-meta");
-  });
-
-  it("renders the empty state without rendering MobileTabs or sections", () => {
-    const html = renderPage([]);
+    expect(html).toContain("data-briefs-list");
+    expect(html).toContain("Recent work and next steps");
     expect(html).not.toContain("data-briefs-mobile-tabs");
     expect(html).not.toContain("data-briefs-section");
+    expect(html).not.toContain("data-briefs-legend");
+    expect(html).not.toContain("Needs your attention");
+    expect(html).not.toContain("Recently done &amp; stale");
+  });
+
+  it("does not write UI-generated summaries when model summary fallback was used", () => {
+    const html = renderPage(gallery());
+
+    expect(html).toContain("Cost dashboard improvements");
+    expect(html).toContain("Briefing Analyst has not generated this summary yet.");
+    expect(html).not.toContain("This brief tracks");
+    expect(html).not.toContain("Next:");
+    expect(html).not.toContain("Summary unavailable");
+    expect(html).not.toContain("Summary skipped to stay under budget");
+  });
+
+  it("renders issue rows with the host IssueRow bridge and no custom state chips", () => {
+    const html = renderPage(gallery());
+
+    expect(html).toContain('data-plugin-issue-row="PAP-9963"');
+    expect(html).toContain("Wire briefing page UI");
+    expect(html).not.toContain("data-briefs-state-badge");
+    expect(html).not.toContain("data-briefs-row-tag");
+    expect(html).not.toContain("Open tree");
+    expect(html).not.toContain("more in tree");
+  });
+
+  it("keeps the dashboard header lean", () => {
+    const html = renderPage(gallery());
+
+    expect(html).toContain("data-briefs-page-header");
+    expect(html).toContain("data-briefs-page-meta");
+    expect(html).not.toContain("Preferences");
+    expect(html).not.toContain("Durable cards for areas of work");
+  });
+
+  it("renders the empty state without rendering the briefing list", () => {
+    const html = renderPage([]);
+    expect(html).not.toContain("data-briefs-list");
     expect(html).toContain("No briefs yet");
+  });
+});
+
+describe("SidebarLink", () => {
+  it("renders the Briefing sidebar entry with an icon and company route", () => {
+    const html = renderToStaticMarkup(<SidebarLink context={hostContext as never} />);
+
+    expect(html).toContain("Briefing");
+    expect(html).toContain('href="/briefs"');
+    expect(html).toContain("data-briefs-sidebar-icon");
+    expect(html).toContain("color:currentColor");
+  });
+});
+
+describe("SettingsPage", () => {
+  it("renders managed resource status and routine controls", () => {
+    const html = renderToStaticMarkup(<SettingsPage context={hostContext as never} />);
+
+    expect(html).toContain("Managed resources");
+    expect(html).toContain("Briefing Analyst");
+    expect(html).toContain("data-managed-routines-list");
+    expect(html).toContain("Discover Briefing cards");
   });
 });

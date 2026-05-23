@@ -177,6 +177,36 @@ describe("deterministic Briefs cards", () => {
     expect(runSource?.linkPath).toBe("/ACME/agents/agent-1/runs/run-1");
   });
 
+  it("dedupes card task rows by issue and keeps the latest row", () => {
+    const card = buildDeterministicBriefCard(bundle({
+      rootIssueId: "issue-root",
+      issues: [issue()],
+      runs: [{
+        id: "run-1",
+        companyId,
+        issueId: "issue-root",
+        agentId: "agent-1",
+        status: "running",
+        createdAt: "2026-05-22T11:45:00.000Z",
+      }],
+      comments: [{
+        id: "comment-1",
+        companyId,
+        issueId: "issue-root",
+        authorUserId: userId,
+        body: "Latest work note",
+        createdAt: "2026-05-22T11:50:00.000Z",
+      }],
+    }), { now, idFactory: ids() });
+
+    expect(card.snapshot.taskRows).toHaveLength(1);
+    expect(card.snapshot.taskRows[0]).toMatchObject({
+      identifier: "PAP-2381",
+      kind: "comment",
+      titleLine: "Latest work note",
+    });
+  });
+
   it("gives out-of-tree blockers precedence over waiting and live signals", () => {
     const blocked = issue({
       id: "issue-child",
@@ -274,6 +304,38 @@ describe("deterministic Briefs cards", () => {
       summaryStatus: "fallback",
       summaryFailureReason: "safety_block",
     });
+  });
+
+  it("downgrades generated summaries that expose issue ids or status labels", () => {
+    const options = hardenGeneratedSummaryOptions(bundle(), {
+      summaryStatus: "ok",
+      summaryParagraph: "PAP-2381 is todo, while related writing issues are in review.",
+      summaryModel: "cheap-model",
+      allowGeneratedSummary: true,
+    });
+
+    expect(options).toMatchObject({
+      summaryStatus: "fallback",
+      summaryFailureReason: "safety_block",
+    });
+  });
+
+  it("stores generated card titles only when generated wording is explicitly allowed", () => {
+    const source = bundle();
+    const blockedTitle = hardenGeneratedSummaryOptions(source, {
+      title: "Briefing work is moving",
+      summaryStatus: "fallback",
+    });
+    const allowedTitle = hardenGeneratedSummaryOptions(source, {
+      title: "Briefing work is moving",
+      summaryStatus: "ok",
+      summaryParagraph: "The Briefing work is moving through implementation, with the remaining next step focused on validating the dashboard experience.",
+      summaryModel: "cheap-model",
+      allowGeneratedSummary: true,
+    });
+
+    expect(blockedTitle.title).toBeNull();
+    expect(buildDeterministicBriefCard(source, { ...allowedTitle, now, idFactory: ids() }).title).toBe("Briefing work is moving");
   });
 
   it("keeps deterministic cards visible when generated summary validation is blocked", () => {

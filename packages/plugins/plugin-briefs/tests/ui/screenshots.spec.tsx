@@ -6,38 +6,26 @@
  * Skipped by default — set `BRIEFS_CAPTURE_SCREENSHOTS=1` to opt in.
  *
  * Mounts the real `<BriefingPage>` component (the same React tree the host
- * renders) so the captured PNGs reflect MobileTabs, Legend, and the live
- * responsive CSS — not a hand-rolled approximation. The Paperclip plugin SDK
+ * renders) so the captured PNGs reflect the live dashboard composition instead
+ * of a hand-rolled approximation. The Paperclip plugin SDK
  * is mocked so `usePluginData("page", …)` returns the gallery fixture.
  */
 import path from "node:path";
 import fs from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import type { ReactNode } from "react";
 import { afterAll, describe, expect, it, vi } from "vitest";
 
-import type { BriefCard, BriefPreferences } from "../../src/contracts.js";
+import type { BriefCard } from "../../src/contracts.js";
 import { gallery } from "./fixtures.js";
 
 type PageData = {
   cards: BriefCard[];
-  preferences: BriefPreferences;
   fetchedAt: string;
-};
-
-const defaultPreferences: BriefPreferences = {
-  companyId: "company-1",
-  userId: "user-1",
-  cadence: "daily",
-  retentionDays: 14,
-  doneRetentionHours: 48,
-  staleAfterDays: 7,
-  maxUnpinnedCards: 24,
-  scope: "user",
 };
 
 let mockPageData: PageData = {
   cards: [],
-  preferences: defaultPreferences,
   fetchedAt: "2026-05-22T10:00:00.000Z",
 };
 
@@ -56,6 +44,9 @@ vi.mock("@paperclipai/plugin-sdk/ui", () => {
       return { data: null, loading: false, error: null, refresh: () => {} };
     },
     usePluginToast: () => vi.fn(),
+    IssueRow: ({ issue, trailingMeta }: { issue: { identifier?: string | null; title: string }; trailingMeta?: ReactNode }) => (
+      <a data-plugin-issue-row={issue.identifier ?? ""} href={`/issues/${issue.identifier ?? ""}`}>{issue.identifier} {issue.title} {trailingMeta}</a>
+    ),
     useHostLocation: () => ({ pathname: "/PAP/briefs", search: "", hash: "" }),
     usePluginStream: () => ({ events: [], lastEvent: null, connecting: false, connected: false, error: null, close: () => {} }),
   };
@@ -84,11 +75,8 @@ const hostContext = {
 } as const;
 
 function renderPageHtml({ cards, viewportWidth }: { cards: BriefCard[]; viewportWidth: number }): string {
-  mockPageData = { cards, preferences: defaultPreferences, fetchedAt: "2026-05-22T10:00:00.000Z" };
+  mockPageData = { cards, fetchedAt: "2026-05-22T10:00:00.000Z" };
   const isMobile = viewportWidth < 700;
-  // BriefingPage injects the responsive stylesheet via document.head on mount.
-  // SSR doesn't run that side effect, so we inline the same rules in the page
-  // <style>. Keep these in sync with the rules in src/ui/app.tsx.
   const inlineCss = `
     :root {
       --background: oklch(0.145 0 0);
@@ -105,10 +93,6 @@ function renderPageHtml({ cards, viewportWidth }: { cards: BriefCard[]; viewport
     body { font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
     a { color: inherit; }
     @media (max-width: 700px) {
-      [data-briefs-mobile-tabs] { display: flex !important; }
-      [data-briefs-section] > header { display: none !important; }
-      [data-briefs-section][data-mobile-hidden="true"] { display: none !important; }
-      [data-briefs-grid] { grid-template-columns: 1fr !important; }
       [data-briefs-page-header] > [data-briefs-page-meta] { flex-basis: 100% !important; order: 2 !important; }
     }
   `;

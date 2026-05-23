@@ -1253,7 +1253,7 @@ export function createTestHarness(options: TestHarnessOptions): TestHarness {
           routines.set(next.id, next);
           return next;
         },
-        async run(routineKey, companyId) {
+        async run(routineKey, companyId, overrides) {
           const resolved = await this.get(routineKey, companyId);
           if (!resolved.routine) throw new Error(`Managed routine not found: ${routineKey}`);
           const now = new Date();
@@ -1265,8 +1265,8 @@ export function createTestHarness(options: TestHarnessOptions): TestHarness {
             source: "manual",
             status: "queued",
             triggeredAt: now,
-            idempotencyKey: null,
-            triggerPayload: null,
+            idempotencyKey: overrides?.idempotencyKey ?? null,
+            triggerPayload: overrides?.payload ?? (overrides?.variables ? { variables: overrides.variables } : null),
             dispatchFingerprint: null,
             linkedIssueId: null,
             coalescedIntoRunId: null,
@@ -1930,7 +1930,12 @@ export function createTestHarness(options: TestHarnessOptions): TestHarness {
             spentMonthlyCents: 0,
             pauseReason: null,
             pausedAt: null,
-            permissions: { canCreateAgents: Boolean(declaration.permissions?.canCreateAgents) },
+            permissions: {
+              canCreateAgents: Boolean(declaration.permissions?.canCreateAgents),
+              pluginTools: Array.isArray(declaration.permissions?.pluginTools)
+                ? declaration.permissions.pluginTools
+                : [],
+            },
             lastHeartbeatAt: null,
             metadata: managedAgentMetadata(agentKey),
             createdAt: now,
@@ -1968,7 +1973,12 @@ export function createTestHarness(options: TestHarnessOptions): TestHarness {
               spentMonthlyCents: 0,
               pauseReason: null,
               pausedAt: null,
-              permissions: { canCreateAgents: Boolean(declaration.permissions?.canCreateAgents) },
+              permissions: {
+                canCreateAgents: Boolean(declaration.permissions?.canCreateAgents),
+                pluginTools: Array.isArray(declaration.permissions?.pluginTools)
+                  ? declaration.permissions.pluginTools
+                  : [],
+              },
               lastHeartbeatAt: null,
               metadata: managedAgentMetadata(agentKey),
               createdAt: now,
@@ -1989,7 +1999,12 @@ export function createTestHarness(options: TestHarnessOptions): TestHarness {
             adapterConfig: declaration.adapterConfig ?? {},
             runtimeConfig: declaration.runtimeConfig ?? {},
             budgetMonthlyCents: declaration.budgetMonthlyCents ?? 0,
-            permissions: { canCreateAgents: Boolean(declaration.permissions?.canCreateAgents) },
+            permissions: {
+              canCreateAgents: Boolean(declaration.permissions?.canCreateAgents),
+              pluginTools: Array.isArray(declaration.permissions?.pluginTools)
+                ? declaration.permissions.pluginTools
+                : [],
+            },
             metadata: managedAgentMetadata(agentKey, resolved.agent.metadata),
             updatedAt: new Date(),
           };

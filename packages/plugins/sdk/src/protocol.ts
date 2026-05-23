@@ -921,6 +921,9 @@ export interface WorkerToHostMethods {
       companyId: string;
       assigneeAgentId?: string | null;
       projectId?: string | null;
+      variables?: Record<string, string | number | boolean> | null;
+      payload?: Record<string, unknown> | null;
+      idempotencyKey?: string | null;
     },
     result: RoutineRun,
   ];

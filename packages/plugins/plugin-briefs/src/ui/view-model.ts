@@ -38,6 +38,10 @@ export function groupCardsIntoSections(cards: BriefCard[]): BriefSection[] {
   ];
 }
 
+export function sortBriefCards(cards: BriefCard[]): BriefCard[] {
+  return cards.filter((card) => !card.hidden).sort(compareCards);
+}
+
 function compareCards(a: BriefCard, b: BriefCard): number {
   if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
   const aT = Date.parse(a.lastMeaningfulEventAt) || 0;

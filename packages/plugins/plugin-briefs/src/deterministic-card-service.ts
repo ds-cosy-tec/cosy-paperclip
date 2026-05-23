@@ -148,6 +148,7 @@ export type DeterministicBriefOptions = {
   now?: Date | string;
   pinned?: boolean;
   hidden?: boolean;
+  title?: string | null;
   summaryStatus?: BriefSummaryStatus;
   summaryParagraph?: string | null;
   summaryFailureReason?: BriefSummaryFailureReason | null;
@@ -460,6 +461,26 @@ function toTaskRow(source: BriefCardSource): BriefTaskRow | null {
   };
 }
 
+function taskRowDedupeKey(row: BriefTaskRow): string {
+  return row.issueId || row.identifier || `${row.kind}:${row.sourceId}`;
+}
+
+function taskRowTime(row: BriefTaskRow): number {
+  return new Date(row.eventAt).getTime() || 0;
+}
+
+export function dedupeBriefTaskRows(rows: BriefTaskRow[]): BriefTaskRow[] {
+  const byKey = new Map<string, BriefTaskRow>();
+  for (const row of rows) {
+    const key = taskRowDedupeKey(row);
+    const current = byKey.get(key);
+    if (!current || taskRowTime(row) > taskRowTime(current)) {
+      byKey.set(key, row);
+    }
+  }
+  return Array.from(byKey.values()).sort((a, b) => taskRowTime(b) - taskRowTime(a));
+}
+
 function issueRightTag(issue: BriefsIssueInput, bundle: BriefsSourceBundle, treeIssueIds: Set<string>): { tag: string; intraTreeBlocked: boolean | null } {
   if (issue.status === "blocked") {
     const relation = bundle.relations?.[issue.id];
@@ -673,14 +694,14 @@ export function buildDeterministicBriefCard(bundle: BriefsSourceBundle, options:
   );
   const slug = slugifyBriefGrouping(groupingDescription);
   const sources = buildSources(bundle, cardId, idFactory);
-  const taskRows = sources.map(toTaskRow).filter((row): row is BriefTaskRow => Boolean(row)).slice(0, 3);
+  const taskRows = dedupeBriefTaskRows(sources.map(toTaskRow).filter((row): row is BriefTaskRow => Boolean(row))).slice(0, 3);
   const staleAt = addMs(lastEventMs, days(options.preferences?.staleAfterDays ?? DEFAULT_STALE_AFTER_DAYS));
   const retentionMs = stateResult.state === "done"
     ? hours(options.preferences?.doneRetentionHours ?? DEFAULT_DONE_RETENTION_HOURS)
     : days(options.preferences?.retentionDays ?? DEFAULT_RETENTION_DAYS);
   const pinned = options.pinned ?? false;
   const summaryParagraph = summaryStatus === "ok"
-    ? truncate(options.summaryParagraph ?? fallbackSummary(stateResult.state, taskRows), 260)
+    ? truncate(options.summaryParagraph ?? fallbackSummary(stateResult.state, taskRows), 900)
     : null;
 
   const snapshot: BriefSnapshot = {
@@ -707,7 +728,7 @@ export function buildDeterministicBriefCard(bundle: BriefsSourceBundle, options:
     companyId: bundle.companyId,
     userId: bundle.userId,
     slug,
-    title: truncate(bundle.title ?? root.title, 90),
+    title: truncate(options.title ?? bundle.title ?? root.title, 90),
     groupingDescription,
     rootIssueId: root.id,
     state: stateResult.state,

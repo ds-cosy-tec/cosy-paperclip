@@ -908,7 +908,13 @@ export interface PluginRoutinesClient {
     run(
       routineKey: string,
       companyId: string,
-      overrides?: { assigneeAgentId?: string | null; projectId?: string | null },
+      overrides?: {
+        assigneeAgentId?: string | null;
+        projectId?: string | null;
+        variables?: Record<string, string | number | boolean> | null;
+        payload?: Record<string, unknown> | null;
+        idempotencyKey?: string | null;
+      },
     ): Promise<RoutineRun>;
   };
 }

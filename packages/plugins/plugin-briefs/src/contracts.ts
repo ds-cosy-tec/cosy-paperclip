@@ -65,7 +65,7 @@ export const briefSnapshotSchema = z.object({
   companyId: z.string().min(1),
   userId: z.string().min(1),
   cardId: z.string().min(1),
-  summaryParagraph: z.string().max(260).nullable(),
+  summaryParagraph: z.string().max(900).nullable(),
   summaryStatus: briefSummaryStatusSchema,
   summaryModel: z.string().min(1).nullable(),
   summaryTokensIn: z.number().int().nonnegative().nullable(),

@@ -120,7 +120,7 @@ function agentActor(overrides: Record<string, unknown> = {}) {
     agentId: agentA,
     companyId: companyA,
     runId: runA,
-    source: "agent_jwt",
+    source: "agent_key",
     ...overrides,
   };
 }
@@ -602,6 +602,82 @@ describe.sequential("plugin tool and bridge authz", () => {
     );
   });
 
+  it("allows an agent to execute plugin tools explicitly granted in its permissions", async () => {
+    const executeTool = vi.fn().mockResolvedValue({ content: "ok" });
+    const { app } = await createApp(agentActor(), {}, {
+      db: createSelectQueueDb([
+        [{ companyId: companyA, permissions: { pluginTools: ["paperclip.example"] } }],
+        [{ companyId: companyA }],
+        [{ companyId: companyA, agentId: agentA }],
+        [{ companyId: companyA }],
+      ]),
+      toolDeps: {
+        toolDispatcher: {
+          listToolsForAgent: vi.fn(),
+          getTool: vi.fn(() => ({ name: "paperclip.example:search", pluginId: "paperclip.example" })),
+          executeTool,
+        },
+      },
+    });
+
+    const res = await request(app)
+      .post("/api/plugins/tools/execute")
+      .send({
+        tool: "paperclip.example:search",
+        parameters: { q: "test" },
+        runContext: {
+          agentId: agentA,
+          runId: runA,
+          companyId: companyA,
+          projectId: projectA,
+        },
+      });
+
+    expect(res.status).toBe(200);
+    expect(executeTool).toHaveBeenCalledWith(
+      "paperclip.example:search",
+      { q: "test" },
+      {
+        agentId: agentA,
+        runId: runA,
+        companyId: companyA,
+        projectId: projectA,
+      },
+    );
+  });
+
+  it("rejects agent plugin tool execution without matching plugin permission", async () => {
+    const executeTool = vi.fn();
+    const { app } = await createApp(agentActor(), {}, {
+      db: createSelectQueueDb([
+        [{ companyId: companyA, permissions: { pluginTools: ["paperclip.other"] } }],
+      ]),
+      toolDeps: {
+        toolDispatcher: {
+          listToolsForAgent: vi.fn(),
+          getTool: vi.fn(() => ({ name: "paperclip.example:search", pluginId: "paperclip.example" })),
+          executeTool,
+        },
+      },
+    });
+
+    const res = await request(app)
+      .post("/api/plugins/tools/execute")
+      .send({
+        tool: "paperclip.example:search",
+        parameters: { q: "test" },
+        runContext: {
+          agentId: agentA,
+          runId: runA,
+          companyId: companyA,
+          projectId: projectA,
+        },
+      });
+
+    expect(res.status).toBe(403);
+    expect(executeTool).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["legacy data", "post", `/api/plugins/${pluginId}/bridge/data`, { key: "health" }],
     ["legacy action", "post", `/api/plugins/${pluginId}/bridge/action`, { key: "sync" }],
@@ -842,7 +918,7 @@ describe.sequential("plugin tool and bridge authz", () => {
         userId: null,
         agentId: agentA,
         runId: runA,
-        source: "agent_jwt",
+        source: "agent_key",
       },
       renderEnvironment: null,
     });
@@ -879,7 +955,7 @@ describe.sequential("plugin tool and bridge authz", () => {
         userId: null,
         agentId: agentA,
         runId: runA,
-        source: "agent_jwt",
+        source: "agent_key",
       },
       renderEnvironment: null,
     });

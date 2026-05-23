@@ -52,6 +52,7 @@ const manifest: PaperclipPluginManifestV1 = {
     "projects.managed",
     "goals.read",
     "agents.read",
+    "agents.resume",
     "agents.managed",
     "issues.read",
     "issue.subtree.read",
@@ -65,6 +66,7 @@ const manifest: PaperclipPluginManifestV1 = {
     "activity.log.write",
     "plugin.state.read",
     "plugin.state.write",
+    "instance.settings.register",
     "ui.sidebar.register",
     "ui.page.register"
   ],
@@ -84,10 +86,12 @@ const manifest: PaperclipPluginManifestV1 = {
       role: "analyst",
       title: "Briefing Analyst",
       icon: "newspaper",
-      capabilities: "Maintains source-linked Briefing cards, refreshes deterministic card state, and uses cheap-model wording only when budget allows.",
+      capabilities: "Maintains source-linked Briefing cards, refreshes deterministic card state, and writes grounded card titles and descriptions from source rows.",
       adapterType: "codex_local",
       adapterPreference: ["codex_local", "claude_local", "gemini_local", "opencode_local", "cursor", "pi_local"],
       adapterConfig: {
+        dangerouslyBypassApprovalsAndSandbox: true,
+        extraArgs: ["--skip-git-repo-check"],
         paperclipSkillSync: {
           desiredSkills: BRIEFS_MANAGED_SKILL_CANONICAL_KEYS
         }
@@ -103,7 +107,7 @@ const manifest: PaperclipPluginManifestV1 = {
         pluginTools: [PLUGIN_ID]
       },
       status: "paused",
-      budgetMonthlyCents: 0,
+      budgetMonthlyCents: 500,
       instructions: {
         entryFile: "AGENTS.md",
         content: BRIEFING_ANALYST_INSTRUCTIONS,
@@ -261,13 +265,14 @@ const manifest: PaperclipPluginManifestV1 = {
     {
       name: "briefs_refresh_issue_tree",
       displayName: "Refresh Briefing Issue Tree",
-      description: "Build and save a Briefing card for one Paperclip issue tree using deterministic fallback state.",
+      description: "Build and save a Briefing card for one Paperclip issue tree. Call once to inspect deterministic rows, then again with title, summary, and allowGeneratedSummary: true.",
       parametersSchema: {
         type: "object",
         properties: {
           companyId: { type: "string" },
           userId: { type: "string" },
           rootIssueId: { type: "string" },
+          title: { type: "string" },
           summary: { type: "string" },
           summaryModel: { type: "string" },
           summaryTokensIn: { type: "number" },
@@ -295,6 +300,12 @@ const manifest: PaperclipPluginManifestV1 = {
         displayName: "Briefing",
         exportName: "BriefingPage",
         routePath: BRIEFS_ROUTE_PATH
+      },
+      {
+        type: "settingsPage",
+        id: "briefs-settings",
+        displayName: "Briefing",
+        exportName: "SettingsPage"
       }
     ]
   }

@@ -4,6 +4,7 @@ import {
   formatRelative,
   groupCardsIntoSections,
   sectionForState,
+  sortBriefCards,
   stateBadgeLabel,
   stateTone,
 } from "../../src/ui/view-model.js";
@@ -17,25 +18,18 @@ describe("Briefs view model", () => {
     }
   });
 
-  it("sorts cards into Needs you / Live / Settled buckets and respects pinning", () => {
+  it("sorts visible cards into one pinned-then-recent list", () => {
     resetFixtureIds();
-    const sections = groupCardsIntoSections(gallery());
+    const cards = sortBriefCards(gallery());
 
-    const attention = sections.find((s) => s.key === "attention");
-    const live = sections.find((s) => s.key === "live");
-    const settled = sections.find((s) => s.key === "settled");
-    expect(attention?.cards.map((c) => c.title)).toEqual([
+    expect(cards.map((c) => c.title)).toEqual([
+      "Briefs plugin planning",
       "External-adapter plugin: spec review",
       "Sandbox runner crash loop",
-      "Onboarding flow fixes",
-    ]);
-    expect(live?.cards.map((c) => c.title)).toEqual([
-      "Briefs plugin planning",
       "Cost dashboard improvements",
       "Release readiness",
-    ]);
-    expect(settled?.cards.map((c) => c.title)).toEqual([
       "Sidebar plugin slot hardening",
+      "Onboarding flow fixes",
       "GA migration spike",
     ]);
   });
@@ -48,6 +42,7 @@ describe("Briefs view model", () => {
     const cards = [makeCard({ title: "Hidden one", hidden: true })];
     const sections = groupCardsIntoSections(cards);
     for (const s of sections) expect(s.cards).toHaveLength(0);
+    expect(sortBriefCards(cards)).toHaveLength(0);
   });
 
   it("classifies states using the precedence buckets", () => {

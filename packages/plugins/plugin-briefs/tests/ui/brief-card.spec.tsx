@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@paperclipai/plugin-sdk/ui", () => {
@@ -8,6 +9,9 @@ vi.mock("@paperclipai/plugin-sdk/ui", () => {
       linkProps: (to: string) => ({ href: to, onClick: () => {} }),
     }),
     usePluginAction: () => vi.fn(async () => ({ ok: true })),
+    IssueRow: ({ issue, trailingMeta }: { issue: { identifier?: string | null; title: string }; trailingMeta?: ReactNode }) => (
+      <a data-plugin-issue-row={issue.identifier ?? ""} href={`/issues/${issue.identifier ?? ""}`}>{issue.identifier} {issue.title} {trailingMeta}</a>
+    ),
     usePluginData: () => ({ data: null, loading: false, error: null, refresh: () => {} }),
     usePluginToast: () => vi.fn(),
     useHostLocation: () => ({ pathname: "/PAP/briefs", search: "", hash: "" }),
@@ -24,7 +28,7 @@ function renderCard(card: ReturnType<typeof makeCard>): string {
 }
 
 describe("BriefCardView", () => {
-  it("renders title, single state badge, and primary source rows", () => {
+  it("renders title, summary text, and host issue rows for source rows", () => {
     const card = makeCard({
       title: "Briefs plugin planning",
       state: "live",
@@ -39,21 +43,17 @@ describe("BriefCardView", () => {
     const html = renderCard(card);
 
     expect(html).toContain("Briefs plugin planning");
-    expect(html).toMatch(/data-briefs-state-badge="live"[^>]*>Live</);
     expect(html).toContain("Wire briefing page UI");
     expect(html).toContain("Deterministic card service");
     expect(html).toContain("PAP-9963");
     expect(html).toContain("PAP-9961");
-
-    // exactly one state badge per card
-    expect(html.match(/data-briefs-state-badge=/g)?.length).toBe(1);
-
-    // summary slot rendered, no fallback panel
+    expect(html).toContain('data-plugin-issue-row="PAP-9963"');
     expect(html).toContain("data-briefs-summary");
-    expect(html).not.toContain("data-briefs-summary-fallback");
+    expect(html).not.toContain("data-briefs-state-badge");
+    expect(html).not.toContain("data-briefs-row-tag");
   });
 
-  it("renders the fallback panel without disturbing the state badge", () => {
+  it("does not invent a descriptive summary when model summary fallback was used", () => {
     const card = makeCard({
       title: "Cost dashboard improvements",
       state: "live",
@@ -67,14 +67,33 @@ describe("BriefCardView", () => {
     });
     const html = renderCard(card);
 
-    expect(html).toMatch(/data-briefs-state-badge="live"[^>]*>Live</);
-    expect(html).toContain("data-briefs-summary-fallback");
-    expect(html).toContain("Summary unavailable");
-    expect(html).toContain("Summary skipped to stay under budget");
-    expect(html.match(/data-briefs-state-badge=/g)?.length).toBe(1);
+    expect(html).toContain("data-briefs-summary");
+    expect(html).toContain("Briefing Analyst has not generated this summary yet.");
+    expect(html).not.toContain("This brief tracks");
+    expect(html).not.toContain("Next:");
+    expect(html).not.toContain("data-briefs-summary-fallback");
+    expect(html).not.toContain("Summary unavailable");
+    expect(html).not.toContain("Summary skipped to stay under budget");
   });
 
-  it("annotates intra-tree blocked source rows distinctly from out-of-tree blockers", () => {
+  it("dedupes repeated issue rows before rendering", () => {
+    const sharedIssueId = "issue-duplicate";
+    const card = makeCard({
+      snapshot: makeSnapshot({
+        taskRows: [
+          makeTaskRow({ issueId: sharedIssueId, identifier: "PAP-8500", titleLine: "Older work note", eventAt: "2026-05-22T08:00:00.000Z" }),
+          makeTaskRow({ issueId: sharedIssueId, identifier: "PAP-8500", titleLine: "Latest work note", eventAt: "2026-05-22T10:00:00.000Z" }),
+        ],
+      }),
+    });
+    const html = renderCard(card);
+
+    expect(html.match(/data-plugin-issue-row="PAP-8500"/g)).toHaveLength(1);
+    expect(html).toContain("Latest work note");
+    expect(html).not.toContain("Older work note");
+  });
+
+  it("does not render tree-specific blocker annotations", () => {
     const card = makeCard({
       title: "Sandbox runner",
       state: "blocked",
@@ -88,7 +107,9 @@ describe("BriefCardView", () => {
     });
     const html = renderCard(card);
     const matches = html.match(/aria-label="intra-tree blocker"/g) ?? [];
-    expect(matches.length).toBe(1);
+    expect(matches.length).toBe(0);
+    expect(html).not.toContain("more in tree");
+    expect(html).not.toContain("Open tree");
   });
 
   it("renders pin button reflecting card pinned state", () => {

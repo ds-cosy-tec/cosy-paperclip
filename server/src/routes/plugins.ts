@@ -161,6 +161,14 @@ const BUNDLED_PLUGIN_EXAMPLES: AvailablePluginExample[] = [
     tag: "first-party",
   },
   {
+    packageName: "@paperclipai/plugin-briefs",
+    pluginKey: "paperclipai.plugin-briefs",
+    displayName: "Briefs",
+    description: "First-party Briefing page with source-linked work-status cards.",
+    localPath: "packages/plugins/plugin-briefs",
+    tag: "first-party",
+  },
+  {
     packageName: "@paperclipai/plugin-hello-world-example",
     pluginKey: "paperclip.hello-world-example",
     displayName: "Hello World Widget (Example)",
@@ -621,6 +629,67 @@ export function pluginRoutes(
     return companyId === undefined ? base : { ...base, companyId };
   }
 
+  function permissionPluginTools(value: unknown): string[] {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const raw = (value as Record<string, unknown>).pluginTools;
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
+  }
+
+  async function getAgentToolPermission(req: Request) {
+    if (req.actor.type !== "agent" || !req.actor.agentId) return null;
+    const [agent] = await db
+      .select({ companyId: agents.companyId, permissions: agents.permissions })
+      .from(agents)
+      .where(eq(agents.id, req.actor.agentId))
+      .limit(1);
+    if (!agent || agent.companyId !== req.actor.companyId) return null;
+    return {
+      agentId: req.actor.agentId,
+      companyId: agent.companyId,
+      pluginTools: new Set(permissionPluginTools(agent.permissions)),
+    };
+  }
+
+  async function assertPluginToolListAccess(req: Request, pluginKey: string | undefined) {
+    if (req.actor.type === "board") {
+      assertBoardOrgAccess(req);
+      return { mode: "board" as const, pluginTools: null };
+    }
+    const agentAccess = await getAgentToolPermission(req);
+    if (!agentAccess) throw unauthorized("Agent authentication required");
+    if (pluginKey && !agentAccess.pluginTools.has(pluginKey)) {
+      throw forbidden("Agent is not allowed to use this plugin's tools");
+    }
+    return { mode: "agent" as const, pluginTools: agentAccess.pluginTools };
+  }
+
+  async function assertPluginToolExecuteAccess(
+    req: Request,
+    toolPluginKey: string,
+    runContext: ToolRunContext,
+  ) {
+    if (req.actor.type === "board") {
+      assertBoardOrgAccess(req);
+      assertCompanyAccess(req, runContext.companyId);
+      return;
+    }
+    const agentAccess = await getAgentToolPermission(req);
+    if (!agentAccess) throw unauthorized("Agent authentication required");
+    if (agentAccess.agentId !== runContext.agentId) {
+      throw forbidden('"runContext.agentId" must match the authenticated agent');
+    }
+    if (agentAccess.companyId !== runContext.companyId) {
+      throw forbidden('"runContext.companyId" must match the authenticated agent company');
+    }
+    if (req.actor.runId && req.actor.runId !== runContext.runId) {
+      throw forbidden('"runContext.runId" must match the authenticated agent run');
+    }
+    if (!agentAccess.pluginTools.has(toolPluginKey)) {
+      throw forbidden("Agent is not allowed to use this plugin's tools");
+    }
+  }
+
   async function validateToolRunContextScope(runContext: ToolRunContext): Promise<string | null> {
     const [agent] = await db
       .select({ companyId: agents.companyId })
@@ -781,16 +850,18 @@ export function pluginRoutes(
    * Errors: 501 if tool dispatcher is not configured
    */
   router.get("/plugins/tools", async (req, res) => {
-    assertBoardOrgAccess(req);
-
     if (!toolDeps) {
       res.status(501).json({ error: "Plugin tool dispatch is not enabled" });
       return;
     }
 
     const pluginId = req.query.pluginId as string | undefined;
-    const filter = pluginId ? { pluginId } : undefined;
-    const tools = toolDeps.toolDispatcher.listToolsForAgent(filter);
+    const access = await assertPluginToolListAccess(req, pluginId);
+    const tools = access.mode === "agent" && !pluginId
+      ? Array.from(access.pluginTools).flatMap((allowedPluginId) =>
+          toolDeps.toolDispatcher.listToolsForAgent({ pluginId: allowedPluginId }),
+        )
+      : toolDeps.toolDispatcher.listToolsForAgent(pluginId ? { pluginId } : undefined);
     res.json(tools);
   });
 
@@ -815,8 +886,6 @@ export function pluginRoutes(
    * - 502 if the plugin worker is unavailable or the RPC call fails
    */
   router.post("/plugins/tools/execute", async (req, res) => {
-    assertBoardOrgAccess(req);
-
     if (!toolDeps) {
       res.status(501).json({ error: "Plugin tool dispatch is not enabled" });
       return;
@@ -848,17 +917,22 @@ export function pluginRoutes(
       return;
     }
 
-    assertCompanyAccess(req, runContext.companyId);
-    const scopeError = await validateToolRunContextScope(runContext);
-    if (scopeError) {
-      res.status(403).json({ error: scopeError });
-      return;
+    if (req.actor.type === "board") {
+      assertBoardOrgAccess(req);
+      assertCompanyAccess(req, runContext.companyId);
     }
 
     // Verify the tool exists
     const registeredTool = toolDeps.toolDispatcher.getTool(tool);
     if (!registeredTool) {
       res.status(404).json({ error: `Tool "${tool}" not found` });
+      return;
+    }
+
+    await assertPluginToolExecuteAccess(req, registeredTool.pluginId, runContext);
+    const scopeError = await validateToolRunContextScope(runContext);
+    if (scopeError) {
+      res.status(403).json({ error: scopeError });
       return;
     }
 
