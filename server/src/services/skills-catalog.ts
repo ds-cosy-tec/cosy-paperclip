@@ -29,8 +29,13 @@ function loadCatalogManifest(): CatalogManifestFile {
   return JSON.parse(readFileSync(catalogManifestPath, "utf8")) as CatalogManifestFile;
 }
 
-const catalogManifest = loadCatalogManifest();
-const catalogSkills = catalogManifest.skills;
+function getCatalogManifest() {
+  return loadCatalogManifest();
+}
+
+function getCatalogSkills() {
+  return getCatalogManifest().skills;
+}
 
 function normalizePortablePath(input: string) {
   const parts: string[] = [];
@@ -86,7 +91,7 @@ function searchText(skill: CatalogSkill) {
 
 export function listCatalogSkills(query: CatalogSkillListQuery = {}): CatalogSkill[] {
   const normalizedQuery = query.q?.trim().toLowerCase() ?? "";
-  return (catalogSkills as CatalogSkill[])
+  return getCatalogSkills()
     .filter((skill) => !query.kind || skill.kind === query.kind)
     .filter((skill) => !query.category || skill.category === query.category)
     .filter((skill) => !normalizedQuery || searchText(skill).includes(normalizedQuery))
@@ -96,11 +101,12 @@ export function listCatalogSkills(query: CatalogSkillListQuery = {}): CatalogSki
 export function resolveCatalogSkillReference(reference: string): { skill: CatalogSkill | null; ambiguous: boolean } {
   const trimmed = reference.trim();
   if (!trimmed) return { skill: null, ambiguous: false };
+  const catalogSkills = getCatalogSkills();
 
-  const exact = (catalogSkills as CatalogSkill[]).find((skill) => skill.id === trimmed || skill.key === trimmed);
+  const exact = catalogSkills.find((skill) => skill.id === trimmed || skill.key === trimmed);
   if (exact) return { skill: exact, ambiguous: false };
 
-  const slugMatches = (catalogSkills as CatalogSkill[]).filter((skill) => skill.slug === trimmed);
+  const slugMatches = catalogSkills.filter((skill) => skill.slug === trimmed);
   if (slugMatches.length === 1) return { skill: slugMatches[0]!, ambiguous: false };
   if (slugMatches.length > 1) return { skill: null, ambiguous: true };
   return { skill: null, ambiguous: false };
@@ -147,6 +153,7 @@ export async function readCatalogSkillFile(
 }
 
 export function getCatalogPackageMetadata() {
+  const catalogManifest = getCatalogManifest();
   return {
     packageName: catalogManifest.packageName,
     packageVersion: catalogManifest.packageVersion,
