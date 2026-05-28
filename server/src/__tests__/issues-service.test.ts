@@ -3740,6 +3740,7 @@ describeEmbeddedPostgres("accepted plan decomposition", () => {
     expect(record?.childIssues.map((child) => child.id).sort()).toEqual(
       [...result.childIssueIds].sort(),
     );
+    expect(record).not.toHaveProperty("requestedChildren");
     expect(record?.childIssues.every((child) => typeof child.title === "string")).toBe(true);
   });
 });

@@ -36,6 +36,9 @@ export const issuePlanDecompositions = pgTable(
       table.sourceIssueId,
       table.status,
     ),
+    activeOwnerIdx: index("issue_plan_decompositions_active_owner_idx")
+      .on(table.companyId, table.ownerAgentId)
+      .where(sql`${table.status} = 'in_flight'`),
     sourceRevisionUq: uniqueIndex("issue_plan_decompositions_source_revision_uq").on(
       table.companyId,
       table.sourceIssueId,

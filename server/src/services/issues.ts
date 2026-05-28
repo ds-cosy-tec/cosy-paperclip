@@ -4414,9 +4414,24 @@ export function issueService(db: Db) {
       const childIssueMap = new Map(childIssueRows.map((row) => [row.id, row]));
 
       return rows.map((row) => {
-        const childIds = normalizeIssuePlanDecompositionChildIds(row.decomposition.childIssueIds);
+        const decomposition = row.decomposition;
+        const childIds = normalizeIssuePlanDecompositionChildIds(decomposition.childIssueIds);
         return {
-          ...row.decomposition,
+          id: decomposition.id,
+          companyId: decomposition.companyId,
+          sourceIssueId: decomposition.sourceIssueId,
+          acceptedPlanRevisionId: decomposition.acceptedPlanRevisionId,
+          acceptedInteractionId: decomposition.acceptedInteractionId,
+          status: decomposition.status,
+          requestFingerprint: decomposition.requestFingerprint,
+          requestedChildCount: decomposition.requestedChildCount,
+          childIssueIds: childIds,
+          ownerAgentId: decomposition.ownerAgentId,
+          ownerUserId: decomposition.ownerUserId,
+          ownerRunId: decomposition.ownerRunId,
+          completedAt: decomposition.completedAt,
+          createdAt: decomposition.createdAt,
+          updatedAt: decomposition.updatedAt,
           acceptedPlanRevisionNumber: row.revisionNumber ?? null,
           childIssues: childIds
             .map((childId) => childIssueMap.get(childId) ?? null)
