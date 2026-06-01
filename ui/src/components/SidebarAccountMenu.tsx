@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BookOpen,
+  Languages,
   LogOut,
   type LucideIcon,
   Moon,
@@ -16,6 +17,7 @@ import { authApi } from "@/api/auth";
 import { queryKeys } from "@/lib/queryKeys";
 import { useSidebar } from "../context/SidebarContext";
 import { useTheme } from "../context/ThemeContext";
+import { getLanguage, setLanguage } from "@/i18n";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "../lib/utils";
@@ -109,6 +111,7 @@ export function SidebarAccountMenu({
   version,
 }: SidebarAccountMenuProps) {
   const [internalOpen, setInternalOpen] = useState(false);
+  const [currentLang, setCurrentLang] = useState(getLanguage);
   const queryClient = useQueryClient();
   const { isMobile, setSidebarOpen } = useSidebar();
   const { theme, toggleTheme } = useTheme();
@@ -221,6 +224,17 @@ export function SidebarAccountMenu({
                 icon={theme === "dark" ? Sun : Moon}
                 onClick={() => {
                   toggleTheme();
+                  setOpen(false);
+                }}
+              />
+              <MenuAction
+                label={currentLang === "de" ? "Switch to English" : "Auf Deutsch wechseln"}
+                description={currentLang === "de" ? "Change language to English." : "Sprache auf Deutsch ändern."}
+                icon={Languages}
+                onClick={() => {
+                  const next = currentLang === "de" ? "en" : "de";
+                  setLanguage(next);
+                  setCurrentLang(next);
                   setOpen(false);
                 }}
               />
