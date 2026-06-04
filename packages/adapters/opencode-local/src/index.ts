@@ -44,7 +44,11 @@ export const SANDBOX_INSTALL_COMMAND =
   'fi; ' +
   'fi';
 
-export const DEFAULT_OPENCODE_LOCAL_MODEL = "openai/gpt-5.2-codex";
+// CoSy-Tec: Default auf ein ohne Login verfuegbares OpenCode-Gratis-Cloud-Modell
+// gesetzt (statt openai/*, fuer das kein API-Key vorliegt). Auto-erzeugte Agenten
+// der autonomen Company nutzen diesen Default und liefen sonst in
+// "Configured OpenCode model is unavailable: openai/...".
+export const DEFAULT_OPENCODE_LOCAL_MODEL = "opencode/deepseek-v4-flash-free";
 
 export function isValidOpenCodeModelId(value: unknown): value is string {
   if (typeof value !== "string") return false;
@@ -53,22 +57,24 @@ export function isValidOpenCodeModelId(value: unknown): value is string {
   return Boolean(trimmed) && slashIndex > 0 && slashIndex !== trimmed.length - 1;
 }
 
+// CoSy-Tec: Fallback-Liste auf die ohne Login verfuegbaren OpenCode-Gratis-Modelle
+// umgestellt. Die UI befuellt die Auswahl normalerweise per Live-Discovery
+// (`opencode models`, enthaelt zusaetzlich ollama/llama3.2:3b); diese Liste greift
+// nur, falls die Discovery fehlschlaegt.
 export const models: Array<{ id: string; label: string }> = [
   { id: DEFAULT_OPENCODE_LOCAL_MODEL, label: DEFAULT_OPENCODE_LOCAL_MODEL },
-  { id: "openai/gpt-5.4", label: "openai/gpt-5.4" },
-  { id: "openai/gpt-5.2", label: "openai/gpt-5.2" },
-  { id: "openai/gpt-5.1-codex-max", label: "openai/gpt-5.1-codex-max" },
-  { id: "openai/gpt-5.1-codex-mini", label: "openai/gpt-5.1-codex-mini" },
+  { id: "opencode/minimax-m3-free", label: "opencode/minimax-m3-free" },
+  { id: "opencode/nemotron-3-ultra-free", label: "opencode/nemotron-3-ultra-free" },
+  { id: "opencode/mimo-v2.5-free", label: "opencode/mimo-v2.5-free" },
 ];
 
 export const modelProfiles: AdapterModelProfileDefinition[] = [
   {
     key: "cheap",
     label: "Cheap",
-    description: "Use OpenCode's known Codex mini model as the budget lane.",
+    description: "CoSy-Tec: Gratis-OpenCode-Cloud-Modell als Budget-Lane (kein API-Key noetig).",
     adapterConfig: {
-      model: "openai/gpt-5.1-codex-mini",
-      variant: "low",
+      model: "opencode/deepseek-v4-flash-free",
     },
     source: "adapter_default",
   },
